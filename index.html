@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emoji 解碼挑戰 - 溝通實驗室</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+   
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import {
+            getFirestore,
+            collection,
+            addDoc,
+            serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        // Firebase 配置
+        const firebaseConfig = {
+            apiKey: "AIzaSyDhZ_6SDLt60IG8ACPEV3Wel2nxgdxvl3I",
+            authDomain: "encodingdecoding.firebaseapp.com",
+            projectId: "encodingdecoding",
+            storageBucket: "encodingdecoding.firebasestorage.app",
+            messagingSenderId: "643483313168",
+            appId: "1:643483313168:web:ed93a38b8e20220c759695",
+            measurementId: "G-56QPXNS85X"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // 將 Firebase 方法掛載到 window 以供後續腳本使用
+        window.db = db;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.serverTimestamp = serverTimestamp;
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; overflow: hidden; height: 100vh; display: flex; align-items: center; justify-content: center; background-color: #f0f2f5; font-size: 13px; }
+        
+        /* 聊天氣泡樣式 */
+        .message-bubble { border-radius: 1.25rem; padding: 0.95rem 1.2rem; max-width: 85%; font-size: 1.05rem; line-height: 1.6; transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1); position: relative; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .message-sent { background-color: #4f46e5; color: white; border-bottom-right-radius: 0.25rem; align-self: flex-end; }
+        .message-received { background-color: #ffffff; color: #1f2937; border-bottom-left-radius: 0.25rem; align-self: flex-start; }
+        
+        .hide-scrollbar-on-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+        .hide-scrollbar-on-scroll::-webkit-scrollbar { display: none; }
+        
+        /* 打字指示器動畫 */
+        .dot { height: 5px; width: 5px; background-color: #94a3b8; border-radius: 50%; display: inline-block; animation: dot-blink 1.4s infinite both; }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes dot-blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
+        
+        /* 自定義拖曳條 */
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; cursor: pointer; background: #e2e8f0; border-radius: 3px; }
+        input[type=range]::-webkit-slider-thumb { height: 24px; width: 24px; border-radius: 50%; background: #4f46e5; cursor: pointer; -webkit-appearance: none; margin-top: -9px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); border: 2px solid white; transition: scale 0.2s; }
+        input[type=range]:active::-webkit-slider-thumb { scale: 1.2; }
+        
+        .slider-ticks { display: flex; justify-content: space-between; padding: 0 10px; margin-top: -12px; pointer-events: none; }
+        .tick { width: 2px; height: 10px; background: #cbd5e1; }
+        
+        .flow-step { position: relative; padding: 12px; border: 2px solid #e0e7ff; border-radius: 12px; background: white; text-align: center; }
+        .flow-arrow { width: 2px; height: 20px; background: #c7d2fe; margin: 0 auto; }
+    </style>
+</head>
+<body class="p-2 md:p-4">
+
+    <!-- 載入遮罩 -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent mb-4"></div>
+        <p class="text-indigo-900 text-lg font-medium">載入編碼模組...</p>
+    </div>
+
+    <!-- 解碼偏離警示視窗 -->
+    <div id="divergence-alert" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[80] hidden items-center justify-center p-6">
+        <div class="bg-white w-full max-w-xs rounded-3xl p-8 shadow-2xl text-center">
+            <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl font-black">-1</div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">解碼偏離</h3>
+            <p class="text-gray-500 text-sm mb-8 leading-relaxed">你的選擇與設計者的預設路徑產生了分歧。</p>
+            <button onclick="closeDivergenceAlert()" class="w-full bg-gray-900 text-white font-bold py-4 rounded-xl text-base shadow-lg active:scale-95 transition-all">繼續分析原因</button>
+        </div>
+    </div>
+
+    <div id="transition-mask" class="fixed inset-0 bg-white opacity-0 transition-opacity duration-1000 z-[100] hidden pointer-events-none"></div>
+
+    <!-- 理論視窗 -->
+    <div id="theory-modal" class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-[60] hidden items-center justify-center p-6">
+        <div class="bg-white w-full max-w-lg rounded-[2rem] p-8 max-h-[85vh] overflow-y-auto shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-bold text-gray-800">💡 為什麼我們會誤解？</h3>
+                <button onclick="toggleTheory()" class="text-gray-400 hover:text-gray-600 text-4xl">&times;</button>
+            </div>
+            <div class="space-y-8 text-left">
+                <section class="bg-indigo-50 p-6 rounded-2xl border border-indigo-100">
+                    <h4 class="font-bold text-indigo-900 text-lg mb-3">丟球與接球</h4>
+                    <p class="text-gray-700 leading-relaxed mb-4 text-[13px]">溝通就像「丟球」。我心裡想著一種意思（編碼），把球丟出去。但你接球時（解碼），會根據你的經驗與習慣來解讀這顆球。</p>
+                    <div class="mt-6 border-t border-indigo-200 pt-6">
+                        <h5 class="text-[11px] font-bold text-indigo-800 mb-4 tracking-wider uppercase text-center">斯圖亞特·霍爾的傳播循環：</h5>
+                        <div class="space-y-0 flex flex-col items-center">
+                            <div class="flow-step w-full"><span class="block text-[11px] text-indigo-400 font-bold">階段一</span><span class="font-bold text-gray-800 text-[13px]">生產 (Production)</span></div>
+                            <div class="flow-arrow"></div>
+                            <div class="flow-step w-full"><span class="block text-[11px] text-indigo-400 font-bold">階段二</span><span class="font-bold text-gray-800 text-[13px]">流通 (Circulation)</span></div>
+                            <div class="flow-arrow"></div>
+                            <div class="flow-step w-full"><span class="block text-[11px] text-indigo-400 font-bold">階段三</span><span class="font-bold text-gray-800 text-[13px]">分配/消費</span></div>
+                            <div class="flow-arrow"></div>
+                            <div class="flow-step w-full"><span class="block text-[11px] text-indigo-400 font-bold">階段四</span><span class="font-bold text-gray-800 text-[13px]">再生產 (Reproduction)</span></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <button onclick="toggleTheory()" class="mt-8 bg-indigo-600 text-white font-bold py-5 px-6 rounded-xl w-full text-xl shadow-lg active:scale-95 transition-all">回到實驗</button>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed top-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-8 py-4 rounded-full text-base transition-opacity opacity-0 pointer-events-none z-50"></div>
+
+    <div id="main-card" class="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden relative flex flex-col max-h-[95vh]">
+        <div class="absolute top-0 left-0 w-full h-2 bg-gray-100 z-10"><div id="progress-bar" class="h-full bg-indigo-600 transition-all duration-500" style="width: 0%"></div></div>
+
+        <div id="content-container" class="p-0 flex-1 overflow-y-auto hide-scrollbar-on-scroll flex flex-col relative bg-[#f7f7f9]">
+            <!-- 引導頁面 -->
+            <div id="landing" class="flex-1 flex flex-col">
+                <div id="landing-header" class="p-6 bg-white border-b border-gray-100 flex items-center justify-between sticky top-0 z-20 transition-opacity">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xl">💬</div>
+                        <div class="text-left">
+                            <h1 class="font-bold text-lg text-gray-800">溝通解碼實驗室</h1>
+                            <p class="text-[11px] text-emerald-500 font-bold flex items-center gap-1 uppercase tracking-widest">Decoding Lab</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-1 p-6 flex flex-col relative">
+                    <div id="intro-chat-container" class="hidden space-y-6 flex flex-col mb-10">
+                        <div id="msg-1" class="message-bubble message-received opacity-0 translate-y-4 text-left">對方傳了一個 🙂 給我...</div>
+                        <div id="msg-2" class="message-bubble message-sent opacity-0 translate-y-4 text-left">那代表他在微笑，對吧？</div>
+                        <div id="msg-3" class="message-bubble message-received opacity-0 translate-y-4 text-left">在特定的社會脈絡下，那可能是另一種截然不同的含義。</div>
+                        <div id="typing-indicator" class="flex gap-1.5 ml-3 my-3"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+                        <div id="question-prompt" class="mt-10 text-center opacity-0 scale-95 transition-all duration-700">
+                            <div class="p-8 bg-white rounded-3xl border border-indigo-100 shadow-sm">
+                                 <p class="text-indigo-900 font-bold text-xl leading-tight">你對符號的「編碼」，<br>與設計者預想的一樣嗎？</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-1 flex flex-col justify-center items-center text-center p-6" id="start-trigger-btn">
+                        <div class="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-8"><span class="text-5xl animate-pulse">🔎</span></div>
+                        <h2 class="text-2xl font-black text-gray-800 mb-3">表情符號之下，你想說什麼？</h2>
+                        <h3 class="text-base text-gray-400 mb-10 max-w-[280px] mx-auto text-center">你的解碼慣性是什麼？</h3>
+                        <button onclick="startIntro()" class="w-full bg-indigo-600 text-white font-bold py-6 rounded-2xl shadow-xl transition-all active:scale-95 text-2xl">開啟對話 🚀</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 測驗階段 -->
+            <div id="quiz" class="hidden p-8">
+                <div id="context-label" class="inline-block px-4 py-1.5 bg-indigo-100 text-indigo-700 text-[11px] font-black rounded-full mb-6 uppercase tracking-widest"></div>
+                <h2 id="scenario" class="text-2xl font-bold text-gray-800 mb-6 leading-relaxed text-left"></h2>
+                <div class="p-6 bg-white rounded-2xl border-l-4 border-indigo-600 shadow-sm mb-10 text-left">
+                    <p class="text-[11px] text-gray-400 font-bold mb-1 uppercase tracking-tighter">你的真實意圖：</p>
+                    <p id="intention" class="text-indigo-900 font-medium text-lg"></p>
+                </div>
+                <div id="options" class="space-y-2"></div>
+            </div>
+
+            <!-- 分析階段 -->
+            <div id="survey" class="hidden p-8 overflow-y-auto hide-scrollbar-on-scroll">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="px-4 py-1.5 bg-indigo-100 text-indigo-700 text-[11px] font-black rounded-full uppercase tracking-widest shrink-0">深層解碼診斷</div>
+                    <div id="survey-scenario-ref" class="text-[11px] text-gray-400 font-medium text-right truncate ml-4"></div>
+                </div>
+                
+                <div class="mb-8 p-6 bg-indigo-50 rounded-2xl border border-indigo-100 text-left">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span id="selected-emoji-display" class="text-4xl"></span>
+                        <div class="text-left">
+                            <h4 class="font-bold text-indigo-900 text-base">意義定義</h4>
+                            <p class="text-[10px] text-indigo-400 font-bold uppercase">Meaning Definition</p>
+                        </div>
+                    </div>
+                    <textarea id="meaning-input" class="w-full p-4 rounded-xl border-2 border-indigo-200 focus:border-indigo-500 focus:outline-none text-gray-700 text-base" rows="2" placeholder="這個 Emoji 對你來說具體代表什麼？"></textarea>
+                </div>
+
+                <div class="mb-10 text-left">
+                    <h3 class="text-xl font-bold text-gray-800 mb-2 leading-tight">編碼時的心理權重：</h3>
+                    <p class="text-xs text-gray-400 mb-8 font-medium">請拖曳至對應節點評估影響程度 (0-5)</p>
+                    <div class="space-y-12" id="sliders-box">
+                        <!-- 滑桿由 JavaScript 生成 -->
+                    </div>
+                </div>
+
+                <div class="flex gap-4 pt-8 border-t border-gray-100">
+                    <button onclick="goBackToQuiz()" class="flex-1 bg-gray-100 text-gray-500 font-bold py-6 rounded-2xl hover:bg-gray-200 transition-colors text-lg">回到上一題</button>
+                    <button onclick="submitSurvey()" class="flex-[2] bg-indigo-600 text-white font-bold py-6 rounded-2xl shadow-lg hover:bg-indigo-700 transition-all text-lg">確認送出訊息</button>
+                </div>
+            </div>
+
+            <!-- 結果階段 -->
+            <div id="result" class="hidden p-8 text-center relative overflow-y-auto hide-scrollbar-on-scroll">
+                <div class="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8 text-4xl shadow-xl text-white">⚖️</div>
+                <h2 class="text-3xl font-black text-gray-800 mb-8">解碼差距分析</h2>
+                <div class="grid grid-cols-1 gap-4 mb-10">
+                    <div class="bg-indigo-600 p-8 rounded-[1.5rem] text-white text-left shadow-2xl">
+                        <p class="text-[10px] opacity-70 font-bold uppercase tracking-widest mb-2">與設計者的共鳴落差</p>
+                        <div class="flex items-baseline gap-2">
+                            <span id="divergence-text" class="text-6xl font-black"></span>
+                            <span class="text-2xl opacity-80">/ 5</span>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-[1.5rem] border border-gray-100 shadow-sm text-left">
+                        <p class="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-1">主要心理驅動因素</p>
+                        <p id="top-factor-text" class="text-xl font-black text-indigo-600"></p>
+                    </div>
+                </div>
+                <div class="result-actions space-y-4">
+                    <button onclick="captureResult()" class="w-full bg-gray-900 text-white font-bold py-6 rounded-2xl flex items-center justify-center gap-3 shadow-xl text-lg hover:bg-black transition-all">下載分析圖譜</button>
+                    <div class="grid grid-cols-2 gap-4">
+                        <button onclick="resetChallenge()" class="bg-emerald-600 text-white font-bold py-5 rounded-2xl shadow-md text-base hover:bg-emerald-700">重啟實驗</button>
+                        <button onclick="toggleTheory()" class="bg-indigo-50 text-indigo-700 font-bold py-5 rounded-2xl text-base hover:bg-indigo-100">理論依據</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 設定測驗資料
+        const questions = [
+            {
+                scenario: "情境：我喜歡的人幫我買了早餐",
+                context: "情感互動場域",
+                intention: "我很開心，也有被打動到",
+                phrase: "你也太好了吧",
+                options: ["🥹", "🥺", "🥵"],
+                correct: 0
+            },
+            {
+                scenario: "情境：我決定今天向老闆裸辭",
+                context: "職場互動場域",
+                intention: "我不介意之後的關係，只想展現自在",
+                phrase: "反正我不在乎",
+                options: ["💅", "😍", "😗"],
+                correct: 0
+            },
+            {
+                scenario: "情境：朋友和我分享了一個冷笑話",
+                context: "社交維繫場域",
+                intention: "其實覺得有點尷尬，但想帶過",
+                phrase: "你開心就好",
+                options: ["😀", "😍", "🙂‍↕️"],
+                correct: 1
+            },
+            {
+                scenario: "情境：朋友在多人群組中不小心傳錯訊息，卻無法收回",
+                context: "公共社交規範",
+                intention: "覺得尷尬但要裝作從容",
+                phrase: "沒事，別在意",
+                options: ["😀", "🤗", "🙌"],
+                correct: 1
+            },
+            {
+                scenario: "情境：我和朋友分享我剛看完一部感人的電影",
+                context: "情感共鳴分享",
+                intention: "我被感動到了，希望能傳達這種感性",
+                phrase: "這段真的太感人了吧",
+                options: ["🤧", "🥹", "😭"],
+                correct: 0
+            }
+        ];
+
+        let current = 0;
+        let sessionResults = [];
+        let currentFactors = {
+            "跟上網路流行用法": 0,
+            "裝可愛撒嬌避免衝突": 0,
+            "避免不禮貌得罪他人": 0,
+            "強化自己文字的情緒力量": 0
+        };
+
+        // 頁面初始化
+        window.onload = () => {
+            setTimeout(() => {
+                document.getElementById('loading-overlay').classList.add('hidden');
+            }, 500);
+            renderSliders();
+        };
+
+        // 生成心理權重滑桿
+        function renderSliders() {
+            const container = document.getElementById('sliders-box');
+            container.innerHTML = Object.keys(currentFactors).map(factor => `
+                <div class="slider-container">
+                    <div class="flex justify-between items-center mb-4 text-left">
+                        <span class="font-bold text-gray-700">${factor}</span>
+                        <span id="val-${factor}" class="bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-bold">0</span>
+                    </div>
+                    <div class="relative px-1">
+                        <input type="range" min="0" max="5" step="1" value="0" oninput="updateFactorValue('${factor}', this.value)">
+                        <div class="slider-ticks">
+                            <div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.updateFactorValue = (factor, val) => {
+            currentFactors[factor] = parseInt(val);
+            document.getElementById(`val-${factor}`).innerText = val;
+        };
+
+        // 啟動引導對話
+        window.startIntro = () => {
+            document.getElementById("start-trigger-btn").classList.add("hidden");
+            document.getElementById("landing-header").classList.add("opacity-0");
+            const chatContainer = document.getElementById("intro-chat-container");
+            chatContainer.classList.remove("hidden");
+
+            setTimeout(() => { document.getElementById("msg-1").classList.remove("opacity-0", "translate-y-4"); }, 200);
+            setTimeout(() => { document.getElementById("msg-2").classList.remove("opacity-0", "translate-y-4"); }, 1200);
+            setTimeout(() => { document.getElementById("msg-3").classList.remove("opacity-0", "translate-y-4"); }, 2200);
+
+            setTimeout(() => {
+                document.getElementById("typing-indicator").classList.add("hidden");
+                document.getElementById("question-prompt").classList.remove("opacity-0", "scale-95");
+            }, 3200);
+
+            setTimeout(() => {
+                const mask = document.getElementById("transition-mask");
+                mask.classList.remove("hidden");
+                setTimeout(() => mask.classList.add("opacity-100"), 50);
+                setTimeout(() => {
+                    startChallenge();
+                    mask.classList.remove("opacity-100");
+                    setTimeout(() => mask.classList.add("hidden"), 1000);
+                }, 1000);
+            }, 4500);
+        };
+
+        function startChallenge() {
+            document.getElementById("landing").classList.add("hidden");
+            document.getElementById("quiz").classList.remove("hidden");
+            showQuestion();
+        }
+
+        function showQuestion() {
+            const q = questions[current];
+            const progress = (current / questions.length) * 100;
+            document.getElementById("progress-bar").style.width = `${progress}%`;
+            document.getElementById("scenario").innerText = q.scenario;
+            document.getElementById("context-label").innerText = q.context;
+            document.getElementById("intention").innerText = q.intention;
+
+            const optDiv = document.getElementById("options");
+            optDiv.innerHTML = `<p class="text-[11px] text-gray-400 mb-2 font-bold text-left ml-1">你會如何回覆：</p>`;
+            q.options.forEach((e, i) => {
+                const btn = document.createElement("button");
+                btn.className = "w-full p-5 mb-4 text-left border-2 border-gray-100 rounded-xl hover:border-indigo-500 hover:bg-indigo-50 transition-all group flex items-center justify-between shadow-sm bg-white";
+                btn.innerHTML = `
+                    <div class="flex flex-col text-left"><span class="text-gray-700 font-medium text-lg">${q.phrase}</span></div>
+                    <span class="text-4xl group-hover:scale-125 transition-transform">${e}</span>
+                `;
+                btn.onclick = () => selectOption(i);
+                optDiv.appendChild(btn);
+            });
+        }
+
+        function selectOption(index) {
+            const q = questions[current];
+            const isMatch = index === q.correct;
+            const tempResult = { scenario: q.scenario, context: q.context, selectedEmoji: q.options[index], isMatch: isMatch };
+
+            if (!isMatch) {
+                window.lastTempResult = tempResult;
+                document.getElementById("divergence-alert").classList.remove("hidden");
+                document.getElementById("divergence-alert").classList.add("flex");
+            } else {
+                proceedToSurvey(tempResult);
+            }
+        }
+
+        window.closeDivergenceAlert = () => {
+            document.getElementById("divergence-alert").classList.add("hidden");
+            document.getElementById("divergence-alert").classList.remove("flex");
+            proceedToSurvey(window.lastTempResult);
+        };
+
+        function proceedToSurvey(tempResult) {
+            document.getElementById("quiz").classList.add("hidden");
+            document.getElementById("survey").classList.remove("hidden");
+            document.getElementById("survey").scrollTop = 0;
+            
+            document.getElementById("selected-emoji-display").innerText = tempResult.selectedEmoji;
+            document.getElementById("survey-scenario-ref").innerText = tempResult.scenario;
+            document.getElementById("meaning-input").value = "";
+            
+            // 重置滑桿數值
+            const sliders = document.querySelectorAll('#sliders-box input[type="range"]');
+            sliders.forEach(s => s.value = 0);
+            Object.keys(currentFactors).forEach(f => {
+                currentFactors[f] = 0;
+                document.getElementById(`val-${f}`).innerText = "0";
+            });
+            
+            window.currentTempResult = tempResult;
+        }
+
+        // 送出調查與 Firebase 儲存
+        window.submitSurvey = async () => {
+            const meaning = document.getElementById("meaning-input").value.trim();
+            if (!meaning) return showToast("請描述你預設的意義");
+
+            const resultData = {
+                ...window.currentTempResult,
+                meaning,
+                factors: { ...currentFactors }
+            };
+
+            sessionResults.push(resultData);
+
+            // Firebase 寫入
+            try {
+                if (window.db && window.addDoc) {
+                    await window.addDoc(
+                        window.collection(window.db, "emojiResponses"),
+                        {
+                            ...resultData,
+                            createdAt: window.serverTimestamp(),
+                            userAgent: navigator.userAgent
+                        }
+                    );
+                    console.log("Firestore 寫入成功");
+                }
+            } catch (error) {
+                console.error("Firestore 寫入失敗:", error);
+            }
+
+            current++;
+            if (current < questions.length) {
+                document.getElementById("survey").classList.add("hidden");
+                document.getElementById("quiz").classList.remove("hidden");
+                showQuestion();
+            } else {
+                finishChallenge();
+            }
+        };
+
+        function finishChallenge() {
+            document.getElementById("survey").classList.add("hidden");
+            const divCount = sessionResults.filter(r => !r.isMatch).length;
+            
+            document.getElementById("result").classList.remove("hidden");
+            document.getElementById("divergence-text").innerText = divCount;
+            
+            let factorTotals = {};
+            sessionResults.forEach(r => {
+                Object.keys(r.factors).forEach(f => factorTotals[f] = (factorTotals[f] || 0) + r.factors[f]);
+            });
+            let topFactor = Object.keys(factorTotals).reduce((a, b) => (factorTotals[a] || 0) > (factorTotals[b] || 0) ? a : b);
+            document.getElementById("top-factor-text").innerText = topFactor;
+            document.getElementById("progress-bar").style.width = `100%`;
+        }
+
+        window.goBackToQuiz = () => {
+            document.getElementById("survey").classList.add("hidden");
+            document.getElementById("quiz").classList.remove("hidden");
+        };
+
+        window.resetChallenge = () => { location.reload(); };
+
+        window.toggleTheory = () => {
+            const m = document.getElementById("theory-modal");
+            m.classList.toggle("hidden");
+            m.classList.toggle("flex");
+        };
+
+        // 截圖下載功能
+        window.captureResult = () => {
+            const area = document.getElementById("main-card");
+            const btns = document.querySelector(".result-actions");
+            btns.classList.add("hidden");
+            html2canvas(area, { scale: 2 }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'Emoji_Lab_Report.png';
+                link.href = canvas.toDataURL();
+                link.click();
+                btns.classList.remove("hidden");
+                showToast("報告圖譜已下載");
+            });
+        };
+
+        function showToast(msg) {
+            const t = document.getElementById("toast");
+            t.innerText = msg;
+            t.classList.remove("opacity-0");
+            setTimeout(() => t.classList.add("opacity-0"), 2000);
+        }
+    </script>
+</body>
+</html>
